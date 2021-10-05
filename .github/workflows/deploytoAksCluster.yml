@@ -1,0 +1,63 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    
+    - uses: actions/checkout@master
+    
+    - uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Create ACR
+      id: create-acr
+      run: |
+        az acr create -n sib123 -g sib123a2f0-rg --location "West US 2" --sku Standard --admin-enabled
+        echo "::set-output name=acr_username::`az acr credential show -n sib123 --query username | xargs`"
+        echo "::set-output name=acr_password::`az acr credential show -n sib123 --query passwords[0].value | xargs`"
+        echo "::add-mask::`az acr credential show -n sib123 --query passwords[0].value | xargs`"
+
+    - uses: azure/docker-login@v1
+      with:
+        login-server: sib123.azurecr.io
+        username: ${{ steps.create-acr.outputs.acr_username }}
+        password: ${{ steps.create-acr.outputs.acr_password }}
+
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/https://hub.docker.com/_/postgres" -f  "https://hub.docker.com/_/postgres" -t sib123.azurecr.io/aks:${{ github.sha }} --label dockerfile-path=https://hub.docker.com/_/postgres
+        docker push sib123.azurecr.io/aks:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      id: login
+      with:
+         kubeconfig: ${{ secrets.aks_aks_kubeConfig }}
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep aksb530 | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace aksb530`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: aksb530
+        container-registry-url: sib123.azurecr.io
+        container-registry-username: ${{ steps.create-acr.outputs.acr_username }}
+        container-registry-password: ${{ steps.create-acr.outputs.acr_password }}
+        secret-name: aksdockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: aksb530
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+        images: |
+          sib123.azurecr.io/aks:${{ github.sha }}
+        imagepullsecrets: |
+          aksdockerauth   
