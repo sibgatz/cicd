@@ -1,0 +1,19 @@
+apiVersion : apps/v1
+kind: Deployment
+metadata:
+  name: "aks-3775"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: "aks-3775"
+  template:
+    metadata:
+      labels:
+        app: "aks-3775"
+    spec:
+      containers:
+        - name: "aks-3775"
+          image: "sib123.azurecr.io/aks"
+          ports:
+          - containerPort: 8080
